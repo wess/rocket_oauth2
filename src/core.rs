@@ -9,6 +9,7 @@ use rocket::outcome::{IntoOutcome, Outcome};
 use rocket::request::{FormItems, FromForm, Request};
 use rocket::response::{Redirect, Responder};
 use rocket::{Data, Route, State};
+use serde::de;
 use serde_json::Value as JsonValue;
 
 use crate::OAuthConfig;
@@ -25,7 +26,8 @@ pub struct TokenResponse {
     pub token_type: String,
     /// The lifetime in seconds of the access token, if the authorization server
     /// provided one.
-    pub expires_in: Option<i32>,
+    #[serde(default, deserialize_with = "optional_numeric")]
+    pub expires_in: Option<u64>,
     /// The refresh token, if the server provided one.
     pub refresh_token: Option<String>,
     /// The (space-separated) list of scopes associated with the access token.
@@ -36,6 +38,59 @@ pub struct TokenResponse {
     /// Additional values returned by the authorization server, if any.
     #[serde(flatten)]
     pub extras: HashMap<String, JsonValue>,
+}
+
+fn optional_numeric<'de, D: de::Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error>
+{
+    struct OptionalNumericVisitor;
+
+    impl<'de> de::Visitor<'de> for OptionalNumericVisitor
+    {
+        type Value = Option<u64>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("optional positive integer or positive integer formatted as a string")
+        }
+
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E>
+        {
+            match value.parse() {
+                Ok(v) => Ok(Some(v)),
+                Err(_) => Err(E::invalid_value(de::Unexpected::Str(value), &self)),
+            }
+        }
+
+        fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E>
+        {
+            Ok(Some(value))
+        }
+    }
+
+    deserializer.deserialize_any(OptionalNumericVisitor)
+}
+
+#[test]
+fn deserialize_expires() {
+    assert_eq!(
+        serde_json::from_str::<TokenResponse>(
+            r#"{"access_token":"", "token_type":""}"#
+        ).unwrap().expires_in,
+        None,
+    );
+
+    assert_eq!(
+        serde_json::from_str::<TokenResponse>(
+            r#"{"access_token":"", "token_type":"", "expires_in": 3600}"#
+        ).unwrap().expires_in,
+        Some(3600),
+    );
+
+    assert_eq!(
+        serde_json::from_str::<TokenResponse>(
+            r#"{"access_token":"", "token_type":"", "expires_in": "3600"}"#
+        ).unwrap().expires_in,
+        Some(3600),
+    );
 }
 
 /// An OAuth2 `Adapater` can be implemented by any type that facilitates the
