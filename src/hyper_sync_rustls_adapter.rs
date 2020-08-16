@@ -2,7 +2,7 @@ use std::convert::TryInto;
 use std::io::Read;
 
 use hyper::{
-    header::{Accept, ContentType},
+    header::{Accept, Authorization, Basic, ContentType},
     net::HttpsConnector,
     Client,
 };
@@ -70,14 +70,16 @@ impl Adapter for HyperSyncRustlsAdapter {
                 ser.append_pair("refresh_token", &token);
             }
         }
-        ser.append_pair("client_id", config.client_id());
-        ser.append_pair("client_secret", config.client_secret());
 
         let req_str = ser.finish();
 
         let request = client
             .post(config.provider().token_uri().as_ref())
             .header(Accept::json())
+            .header(Authorization(Basic {
+                username: config.client_id().to_string(),
+                password: Some(config.client_secret().to_string()),
+            }))
             .header(ContentType::form_url_encoded())
             .body(&req_str);
 
